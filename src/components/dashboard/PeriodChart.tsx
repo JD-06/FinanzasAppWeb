@@ -88,7 +88,7 @@ export function PeriodChart({ incomes, expenses, period, selectedYear, selectedM
       <BarChart data={data} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
         <XAxis dataKey="label" tick={{ fontSize: 12 }} />
         <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-        <Tooltip formatter={(v: number) => `$${v.toLocaleString('es-MX')}`} cursor={{ fill: 'transparent' }} />
+        <Tooltip formatter={(v) => `$${Number(v).toLocaleString('es-MX')}`} cursor={{ fill: 'transparent' }} />
         <Legend />
         <Bar dataKey="Ingresos" fill="#10B981" radius={[4, 4, 0, 0]} />
         <Bar dataKey="Gastos" fill="#EF4444" radius={[4, 4, 0, 0]} />
