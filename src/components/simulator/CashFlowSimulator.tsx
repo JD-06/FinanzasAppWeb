@@ -239,7 +239,9 @@ export function CashFlowSimulator() {
   }, [recurringExpenses, projection, horizon, today])
 
   // "¿Puedo pagarlo?" analysis
-  const paymentResult = useMemo(() => {
+  type PaymentOk   = { canAfford: true;  amount: number; best: DayPoint }
+  type PaymentFail = { canAfford: false; amount: number; maxBalance: number }
+  const paymentResult = useMemo((): PaymentOk | PaymentFail | null => {
     const amount = Number(checkAmount)
     if (!amount || amount <= 0) return null
     const affordable = projection.filter(p => p.balance >= amount)
@@ -473,9 +475,8 @@ export function CashFlowSimulator() {
             <div className="space-y-0">
               {upcomingExpenses.map(item => {
                 const balBefore = item.balAfter + item.amount
-                const risky = balBefore < item.amount     // can barely afford it
+                const risky = balBefore < item.amount
                 const tight = !risky && balBefore < item.amount * 2
-                const ok    = !risky && !tight
 
                 return (
                   <div key={item.id}
