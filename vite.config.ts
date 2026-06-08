@@ -15,6 +15,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    assetsDir: 'static-files',
+  },
   test: {
     globals: true,
     environment: 'jsdom',
