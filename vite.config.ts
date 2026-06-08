@@ -16,7 +16,7 @@ export default defineConfig({
     },
   },
   build: {
-    assetsDir: 'static-files',
+    assetsDir: '',
   },
   test: {
     globals: true,
