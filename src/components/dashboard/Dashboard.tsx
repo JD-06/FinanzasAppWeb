@@ -3,10 +3,12 @@ import { useDashboard } from '@/hooks/useDashboard'
 import { StatCard } from './StatCard'
 import { PeriodChart } from './PeriodChart'
 import { ReportCard } from './ReportCard'
+import { FuturePaymentsCard } from './FuturePaymentsCard'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { calcGoalProgress, filterByPeriod } from '@/lib/finance/engine'
 import { Progress } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
+import type { ListPeriod } from '@/lib/finance/listFilter'
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
@@ -199,6 +201,8 @@ export function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      <FuturePaymentsCard period={period as ListPeriod} />
 
       <ReportCard />
     </div>

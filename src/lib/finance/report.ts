@@ -1,4 +1,5 @@
 import type { Income, Expense, Debt, Goal, RecurringIncome, RecurringExpense } from '../supabase/client'
+import type { FuturePaymentsResult } from './futurePayments'
 
 export interface ReportData {
   incomes: Income[]
@@ -7,6 +8,8 @@ export interface ReportData {
   goals: Goal[]
   recurringIncomes: RecurringIncome[]
   recurringExpenses: RecurringExpense[]
+  futurePayments?: FuturePaymentsResult
+  periodLabel?: string
 }
 
 const FREQ_LABELS: Record<string, string> = {
@@ -57,6 +60,26 @@ export function buildCsv(data: ReportData): string {
   lines.push('GASTOS FIJOS')
   lines.push(csvRow('Nombre', 'Monto', 'Frecuencia', 'Próximo Cobro'))
   data.recurringExpenses.forEach(r => lines.push(csvRow(r.name, r.amount, FREQ_LABELS[r.frequency] ?? r.frequency, r.next_charge)))
+
+  if (data.futurePayments) {
+    const fp = data.futurePayments
+    const periodLbl = data.periodLabel ?? ''
+    lines.push('')
+    lines.push(`PAGOS FUTUROS${periodLbl ? ` (${periodLbl})` : ''}`)
+
+    lines.push('GASTOS FUTUROS')
+    lines.push(csvRow('Nombre', 'Frecuencia', 'Ocurrencias', 'Monto Unit.', 'Total'))
+    fp.expenses.forEach(e =>
+      lines.push(csvRow(e.name, FREQ_LABELS[e.frequency] ?? e.frequency, e.occurrences.length, e.amount, e.total))
+    )
+
+    lines.push('')
+    lines.push('INGRESOS FUTUROS')
+    lines.push(csvRow('Nombre', 'Frecuencia', 'Ocurrencias', 'Monto Unit.', 'Total'))
+    fp.incomes.forEach(i =>
+      lines.push(csvRow(i.name, FREQ_LABELS[i.frequency] ?? i.frequency, i.occurrences.length, i.amount, i.total))
+    )
+  }
 
   return lines.join('\n')
 }
@@ -165,6 +188,52 @@ export function printReport(data: ReportData) {
       ['Nombre', 'Monto', 'Frecuencia', 'Próximo Cobro'],
       data.recurringExpenses.map(r => [r.name, `<span class="red">$${fmt(r.amount)}</span>`, FREQ_LABELS[r.frequency] ?? r.frequency, r.next_charge])
     )}
+
+    ${data.futurePayments ? `
+    <h2>Pagos Futuros${data.periodLabel ? ` — ${data.periodLabel}` : ''}</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px">
+      <div style="background:#f0fdf4;padding:8px 14px;border-radius:6px;border:1px solid #bbf7d0">
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase">Ingresos futuros</div>
+        <div style="font-size:15px;font-weight:700;color:#16a34a">$${fmt(data.futurePayments.totalIncomes)}</div>
+      </div>
+      <div style="background:#fef2f2;padding:8px 14px;border-radius:6px;border:1px solid #fecaca">
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase">Gastos futuros</div>
+        <div style="font-size:15px;font-weight:700;color:#dc2626">$${fmt(data.futurePayments.totalExpenses)}</div>
+      </div>
+      <div style="background:#f9fafb;padding:8px 14px;border-radius:6px;border:1px solid #e5e7eb">
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase">Flujo neto</div>
+        <div style="font-size:15px;font-weight:700;color:${data.futurePayments.totalIncomes - data.futurePayments.totalExpenses >= 0 ? '#16a34a' : '#dc2626'}">$${fmt(data.futurePayments.totalIncomes - data.futurePayments.totalExpenses)}</div>
+      </div>
+    </div>
+
+    ${data.futurePayments.expenses.length > 0 ? `
+    <div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin:12px 0 4px">Gastos programados</div>
+    ${table(
+      ['Nombre', 'Frecuencia', 'Próximo pago', 'Ocurrencias', 'Monto c/u', 'Total'],
+      data.futurePayments.expenses.map(e => [
+        e.name,
+        FREQ_LABELS[e.frequency] ?? e.frequency,
+        e.nextDate.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }),
+        String(e.occurrences.length),
+        `$${fmt(e.amount)}`,
+        `<span class="red">$${fmt(e.total)}</span>`,
+      ])
+    )}` : ''}
+
+    ${data.futurePayments.incomes.length > 0 ? `
+    <div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin:12px 0 4px">Ingresos programados</div>
+    ${table(
+      ['Nombre', 'Frecuencia', 'Próxima fecha', 'Ocurrencias', 'Monto c/u', 'Total'],
+      data.futurePayments.incomes.map(i => [
+        i.name,
+        FREQ_LABELS[i.frequency] ?? i.frequency,
+        i.nextDate.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }),
+        String(i.occurrences.length),
+        `$${fmt(i.amount)}`,
+        `<span class="green">$${fmt(i.total)}</span>`,
+      ])
+    )}` : ''}
+    ` : ''}
 
     <script>window.onload = function(){ window.print() }</script>
   </body></html>`

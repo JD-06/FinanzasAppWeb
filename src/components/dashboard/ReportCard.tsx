@@ -12,6 +12,7 @@ import {
   filterByListPeriod, navigatePeriod, periodRangeLabel, isRefInFuture,
 } from '@/lib/finance/listFilter'
 import { downloadCsv, printReport } from '@/lib/finance/report'
+import { computeFuturePayments } from '@/lib/finance/futurePayments'
 
 function fmt(n: number) {
   return n.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
@@ -34,6 +35,11 @@ export function ReportCard() {
   const totalIncome  = filteredIncomes.reduce((s, i) => s + i.amount, 0)
   const totalExpense = filteredExpenses.reduce((s, e) => s + e.amount, 0)
 
+  const futurePayments = useMemo(
+    () => computeFuturePayments(recurringExpenses, recurringIncomes, period, refDate),
+    [recurringExpenses, recurringIncomes, period, refDate]
+  )
+
   const reportData = {
     incomes:  filteredIncomes,
     expenses: filteredExpenses,
@@ -41,6 +47,8 @@ export function ReportCard() {
     goals,
     recurringIncomes,
     recurringExpenses,
+    futurePayments,
+    periodLabel: periodRangeLabel(period, refDate),
   }
 
   return (
