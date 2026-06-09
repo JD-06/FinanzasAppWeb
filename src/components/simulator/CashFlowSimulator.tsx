@@ -135,7 +135,7 @@ export function CashFlowSimulator() {
   const { data: allExpenses = [] } = useExpenses()
   const { data: debts = [] } = useDebts()
 
-  const [horizon, setHorizon] = useState<30 | 60 | 90>(30)
+  const [horizon, setHorizon] = useState<7 | 30 | 60 | 90>(30)
   const [varOverride, setVarOverride] = useState('')
   const [checkAmount, setCheckAmount] = useState('')
 
@@ -199,6 +199,8 @@ export function CashFlowSimulator() {
     const step = horizon <= 60 ? 2 : 3
     return projection.filter((_, i) => i % step === 0)
   }, [projection, horizon])
+
+  const horizonLabel: Record<7 | 30 | 60 | 90, string> = { 7: 'semana', 30: '30 días', 60: '60 días', 90: '90 días' }
 
   const minBalance = projection.length ? Math.min(...projection.map(p => p.balance)) : 0
   const maxBalance = projection.length ? Math.max(...projection.map(p => p.balance)) : 0
@@ -308,10 +310,10 @@ export function CashFlowSimulator() {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-base">Saldo proyectado</CardTitle>
             <div className="flex gap-1">
-              {([30, 60, 90] as const).map(h => (
+              {([7, 30, 60, 90] as const).map(h => (
                 <Button key={h} size="sm" variant={horizon === h ? 'default' : 'outline'} className="h-7 text-xs px-2.5"
                   onClick={() => setHorizon(h)}>
-                  {h} días
+                  {h === 7 ? 'Semana' : `${h}d`}
                 </Button>
               ))}
             </div>
@@ -351,6 +353,7 @@ export function CashFlowSimulator() {
               <p className={`font-bold text-sm ${finalBalance < 0 ? 'text-destructive' : finalBalance > saldoEfectivo ? 'text-emerald-600' : ''}`}>
                 {fmt(finalBalance)}
               </p>
+              <p className="text-[10px] text-muted-foreground">en {horizonLabel[horizon]}</p>
             </div>
           </div>
         </CardContent>
@@ -448,7 +451,7 @@ export function CashFlowSimulator() {
                 </div>
               ) : (
                 <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg p-3 space-y-2 text-sm">
-                  <p className="font-semibold text-red-700 dark:text-red-400">No alcanza en los próximos {horizon} días</p>
+                  <p className="font-semibold text-red-700 dark:text-red-400">No alcanza en {horizonLabel[horizon]}</p>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Tu saldo máximo proyectado:</span>
                     <span className="font-medium">{fmt(paymentResult.maxBalance)}</span>
