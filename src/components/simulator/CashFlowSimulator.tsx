@@ -12,8 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import type { RecurringExpense, RecurringIncome, Frequency } from '@/lib/supabase/client'
-import { getMsiAmountPaidToDate } from '@/lib/finance/engine'
+import type { RecurringExpense, RecurringIncome, Frequency, Expense } from '@/lib/supabase/client'
+import { getMsiAmountPaidToDate, getExpenseAmountForPeriod } from '@/lib/finance/engine'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -46,6 +46,7 @@ function buildProjection(
   startBalance: number,
   recurringExpenses: RecurringExpense[],
   recurringIncomes: RecurringIncome[],
+  msiExpenses: Expense[],
   dailyVar: number,
   days: number,
   today: Date
@@ -66,6 +67,21 @@ function buildProjection(
     let d = new Date(r.next_charge + 'T00:00:00')
     let g = 0; while (d < today && g++ < 800) d = advance(d, r.frequency)
     let c = 0; while (d <= end && c++ < 400) { ensure(d.toISOString().slice(0,10)); map[d.toISOString().slice(0,10)].outflow += r.amount; d = advance(d, r.frequency) }
+  }
+
+  // MSI installments due within the projection window
+  for (const e of msiExpenses) {
+    if (!e.is_msi || e.msi_months <= 1) continue
+    const installment = e.amount / e.msi_months
+    const purchaseDate = new Date(e.date + 'T00:00:00')
+    for (let i = 0; i < e.msi_months; i++) {
+      const d = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth() + i, purchaseDate.getDate())
+      if (d >= today && d <= end) {
+        const key = d.toISOString().slice(0, 10)
+        ensure(key)
+        map[key].outflow += installment
+      }
+    }
   }
 
   const points: DayPoint[] = []
@@ -106,6 +122,24 @@ function avgLastMonths<T extends { date: string }>(items: T[], getAmount: (i: T)
     const sum = items
       .filter(x => { const xd = new Date(x.date + 'T00:00:00'); return xd.getFullYear() === d.getFullYear() && xd.getMonth() === d.getMonth() })
       .reduce((s, x) => s + getAmount(x), 0)
+    if (sum > 0) totals.push(sum)
+  }
+  return totals.length > 0 ? Math.round(totals.reduce((a, b) => a + b, 0) / totals.length) : 0
+}
+
+// Like avgLastMonths but uses MSI-aware installment amounts per month.
+function avgMonthlyVarExpenses(expenses: Expense[], lookbackMonths = 3): number {
+  const now = new Date()
+  const totals: number[] = []
+  for (let i = 1; i <= lookbackMonths; i++) {
+    const ref = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const year = ref.getFullYear()
+    const month = ref.getMonth()
+    let sum = 0
+    for (const e of expenses) {
+      if (e.payment_method === 'Vales de despensa') continue
+      sum += getExpenseAmountForPeriod(e, 'month', year, month)
+    }
     if (sum > 0) totals.push(sum)
   }
   return totals.length > 0 ? Math.round(totals.reduce((a, b) => a + b, 0) / totals.length) : 0
@@ -166,12 +200,9 @@ export function CashFlowSimulator() {
     Math.round(recurringIncomes.reduce((s, r) => s + toMonthly(r.amount, r.frequency), 0)),
     [recurringIncomes])
 
-  // Historical averages (last 3 months)
+  // Historical averages (last 3 months) — using per-month installment amounts for MSI
   const avgMonthlyVar = useMemo(() =>
-    avgLastMonths(
-      allExpenses.filter(e => e.payment_method !== 'Vales de despensa'),
-      e => e.amount
-    ),
+    avgMonthlyVarExpenses(allExpenses),
     [allExpenses])
 
   const avgMonthlyHistIncome = useMemo(() =>
@@ -191,9 +222,13 @@ export function CashFlowSimulator() {
 
   // ── projection ────────────────────────────────────────────────────────────
 
+  const msiExpenses = useMemo(() =>
+    allExpenses.filter(e => e.is_msi && e.msi_months > 1 && e.payment_method !== 'Vales de despensa'),
+    [allExpenses])
+
   const projection = useMemo(() =>
-    buildProjection(saldoEfectivo, recurringExpenses, recurringIncomes, dailyVar, horizon, today),
-    [saldoEfectivo, recurringExpenses, recurringIncomes, dailyVar, horizon, today])
+    buildProjection(saldoEfectivo, recurringExpenses, recurringIncomes, msiExpenses, dailyVar, horizon, today),
+    [saldoEfectivo, recurringExpenses, recurringIncomes, msiExpenses, dailyVar, horizon, today])
 
   const chartData = useMemo(() => {
     if (horizon <= 30) return projection
