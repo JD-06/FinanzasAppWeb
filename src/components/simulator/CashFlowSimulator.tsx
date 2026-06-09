@@ -247,34 +247,58 @@ export function CashFlowSimulator() {
   const bestWeek = useMemo(() => findExtreme(projection, 'best'), [projection])
   const worstWeek = useMemo(() => findExtreme(projection, 'worst'), [projection])
 
-  // Upcoming recurring expenses: name, date, balance before/after
+  // Upcoming expenses (recurring + MSI installments): name, date, balance after payment
   const upcomingExpenses = useMemo(() => {
     const balMap = new Map(projection.map(p => [p.dateStr, p.balance]))
     const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + horizon)
+    type Item = { id: string; name: string; amount: number; dateStr: string; dateLabel: string; balAfter: number }
 
-    return recurringExpenses
-      .flatMap(r => {
-        let d = new Date(r.next_charge + 'T00:00:00')
-        let g = 0; while (d < today && g++ < 800) d = advance(d, r.frequency)
-        const hits: { id: string; name: string; amount: number; dateStr: string; dateLabel: string; balAfter: number }[] = []
-        let c = 0
-        while (d <= end && c++ < 6) {
+    const recurring: Item[] = recurringExpenses.flatMap(r => {
+      let d = new Date(r.next_charge + 'T00:00:00')
+      let g = 0; while (d < today && g++ < 800) d = advance(d, r.frequency)
+      const hits: Item[] = []
+      let c = 0
+      while (d <= end && c++ < 6) {
+        const key = d.toISOString().slice(0, 10)
+        hits.push({
+          id: `${r.id}-${key}`,
+          name: r.name,
+          amount: r.amount,
+          dateStr: key,
+          dateLabel: d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' }),
+          balAfter: balMap.get(key) ?? 0,
+        })
+        d = advance(d, r.frequency)
+      }
+      return hits
+    })
+
+    const msi: Item[] = msiExpenses.flatMap(e => {
+      const installment = e.amount / e.msi_months
+      const purchaseDate = new Date(e.date + 'T00:00:00')
+      const label = e.categories?.name ?? e.notes ?? 'Gasto MSI'
+      const items: Item[] = []
+      for (let i = 0; i < e.msi_months; i++) {
+        const d = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth() + i, purchaseDate.getDate())
+        if (d >= today && d <= end) {
           const key = d.toISOString().slice(0, 10)
-          hits.push({
-            id: `${r.id}-${key}`,
-            name: r.name,
-            amount: r.amount,
+          items.push({
+            id: `msi-${e.id}-${i}`,
+            name: `${label} (${i + 1}/${e.msi_months} MSI)`,
+            amount: installment,
             dateStr: key,
             dateLabel: d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' }),
             balAfter: balMap.get(key) ?? 0,
           })
-          d = advance(d, r.frequency)
         }
-        return hits
-      })
+      }
+      return items
+    })
+
+    return [...recurring, ...msi]
       .sort((a, b) => a.dateStr.localeCompare(b.dateStr))
-      .slice(0, 10)
-  }, [recurringExpenses, projection, horizon, today])
+      .slice(0, 15)
+  }, [recurringExpenses, msiExpenses, projection, horizon, today])
 
   // "¿Puedo pagarlo?" analysis
   type PaymentOk   = { canAfford: true;  amount: number; best: DayPoint }
