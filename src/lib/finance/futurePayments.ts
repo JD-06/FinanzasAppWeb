@@ -31,6 +31,17 @@ function advanceByFrequency(date: Date, frequency: Frequency): Date {
   return d
 }
 
+function goBackByFrequency(date: Date, frequency: Frequency): Date {
+  const d = new Date(date)
+  switch (frequency) {
+    case 'weekly':    d.setDate(d.getDate() - 7); break
+    case 'quincenal': d.setDate(d.getDate() - 15); break
+    case 'monthly':   d.setMonth(d.getMonth() - 1); break
+    case 'yearly':    d.setFullYear(d.getFullYear() - 1); break
+  }
+  return d
+}
+
 function getOccurrencesInRange(
   nextDate: string,
   frequency: Frequency,
@@ -40,19 +51,30 @@ function getOccurrencesInRange(
   const occurrences: Date[] = []
   let current = new Date(nextDate + 'T00:00:00')
 
-  // Advance to first occurrence on/after window start
-  let guard = 0
-  while (current < windowStart && guard < 1000) {
-    const next = advanceByFrequency(current, frequency)
-    if (next.getTime() === current.getTime()) break
-    current = next
-    guard++
+  if (current > windowStart) {
+    // next_date is ahead of windowStart — go back to find earlier occurrences in the window
+    let guard = 0
+    while (guard < 1000) {
+      const prev = goBackByFrequency(current, frequency)
+      if (prev.getTime() === current.getTime() || prev < windowStart) break
+      current = prev
+      guard++
+    }
+  } else {
+    // Advance to first occurrence on/after window start
+    let guard = 0
+    while (current < windowStart && guard < 1000) {
+      const next = advanceByFrequency(current, frequency)
+      if (next.getTime() === current.getTime()) break
+      current = next
+      guard++
+    }
   }
 
   // Collect all occurrences within window
   let count = 0
   while (current <= windowEnd && count < 500) {
-    occurrences.push(new Date(current))
+    if (current >= windowStart) occurrences.push(new Date(current))
     const next = advanceByFrequency(current, frequency)
     if (next.getTime() === current.getTime()) break
     current = next
@@ -72,9 +94,10 @@ export function getPeriodWindow(period: ListPeriod, ref: Date = new Date()): { s
     return { start: today, end }
   }
   if (period === 'month') {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1)
     const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
     end.setHours(23, 59, 59)
-    return { start: today, end }
+    return { start, end }
   }
   if (period === 'year') {
     const end = new Date(today.getFullYear(), 11, 31)
