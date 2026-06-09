@@ -36,10 +36,12 @@ export function buildCsv(data: ReportData): string {
   lines.push('')
 
   lines.push('GASTOS')
-  lines.push(csvRow('Fecha', 'Categoría', 'Monto', 'Método de Pago', 'Estado', 'MSI', 'Notas'))
-  data.expenses.forEach(e =>
-    lines.push(csvRow(e.date, e.categories?.name ?? '', e.amount, e.payment_method, e.status, e.is_msi ? `${e.msi_months}m` : '', e.notes ?? ''))
-  )
+  lines.push(csvRow('Fecha', 'Categoría', 'Monto (cuota)', 'Monto total', 'Método de Pago', 'Estado', 'MSI', 'Notas'))
+  data.expenses.forEach(e => {
+    const isMsi = e.is_msi && e.msi_months > 1
+    const cuota = isMsi ? e.amount / e.msi_months : e.amount
+    lines.push(csvRow(e.date, e.categories?.name ?? '', cuota, e.amount, e.payment_method, e.status, isMsi ? `${e.msi_months}m` : '', e.notes ?? ''))
+  })
   lines.push('')
 
   lines.push('DEUDAS')
@@ -103,7 +105,7 @@ function fmt(n: number) {
 
 export function printReport(data: ReportData) {
   const totalIncome  = data.incomes.reduce((s, i) => s + i.amount, 0)
-  const totalExpense = data.expenses.reduce((s, e) => s + e.amount, 0)
+  const totalExpense = data.expenses.reduce((s, e) => s + (e.is_msi && e.msi_months > 1 ? e.amount / e.msi_months : e.amount), 0)
   const totalDebt    = data.debts.reduce((s, d) => s + d.balance, 0)
   const totalSavings = data.goals.reduce((s, g) => s + g.current_amount, 0)
   const balance      = totalIncome - totalExpense
@@ -156,13 +158,18 @@ export function printReport(data: ReportData) {
     <h2>Gastos (${data.expenses.length})</h2>
     ${table(
       ['Fecha', 'Categoría', 'Monto', 'Método', 'Estado'],
-      data.expenses.map(e => [
-        e.date,
-        `${e.categories?.icon ?? ''} ${e.categories?.name ?? '—'}`,
-        `<span class="red">$${fmt(e.amount)}</span>`,
-        e.payment_method,
-        e.status,
-      ])
+      data.expenses.map(e => {
+        const isMsi = e.is_msi && e.msi_months > 1
+        const displayAmount = isMsi ? e.amount / e.msi_months : e.amount
+        const msiTag = isMsi ? ` <span style="font-size:10px;color:#6b7280">(cuota 1/${e.msi_months} MSI)</span>` : ''
+        return [
+          e.date,
+          `${e.categories?.icon ?? ''} ${e.categories?.name ?? '—'}`,
+          `<span class="red">$${fmt(displayAmount)}</span>${msiTag}`,
+          e.payment_method,
+          e.status,
+        ]
+      })
     )}
 
     <h2>Deudas</h2>
