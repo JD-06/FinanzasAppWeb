@@ -3,7 +3,7 @@ import { useIncomes } from './useIncomes'
 import { useExpenses } from './useExpenses'
 import { useDebts } from './useDebts'
 import { useGoals } from './useGoals'
-import { filterByPeriod, type Period } from '@/lib/finance/engine'
+import { filterByPeriod, getExpenseAmountForPeriod, getMsiAmountPaidToDate, type Period } from '@/lib/finance/engine'
 
 export function useDashboard() {
   const now = new Date()
@@ -30,7 +30,9 @@ export function useDashboard() {
     const saldoFondo = allIncomes.filter(i => i.type === 'Fondo ahorro empresa').reduce((s, i) => s + i.amount, 0)
 
     const totalRealMoneyIncomes = allIncomes.filter(i => i.type !== 'Vales de despensa' && i.type !== 'Fondo ahorro empresa').reduce((s, i) => s + i.amount, 0)
-    const totalRealMoneyExpenses = allExpenses.filter(e => e.payment_method !== 'Vales de despensa').reduce((s, e) => s + e.amount, 0)
+    const totalRealMoneyExpenses = allExpenses
+      .filter(e => e.payment_method !== 'Vales de despensa')
+      .reduce((s, e) => s + getMsiAmountPaidToDate(e), 0)
     const saldoEfectivo = totalRealMoneyIncomes - totalRealMoneyExpenses
 
     const totalDebt = allDebts.reduce((s, d) => s + d.balance, 0)
@@ -42,16 +44,16 @@ export function useDashboard() {
 
     // Period Stats — filtradas por año/mes seleccionado
     const periodIncomes = filterByPeriod(allIncomes, period, selectedYear, selectedMonth)
-    const periodExpenses = filterByPeriod(allExpenses, period, selectedYear, selectedMonth)
 
     const income = periodIncomes.reduce((s, i) => s + i.amount, 0)
-    const expense = periodExpenses.reduce((s, e) => s + e.amount, 0)
-    const realExpenses = periodExpenses
-      .filter(e => e.payment_method !== 'Vales de despensa')
-      .reduce((s, e) => s + e.amount, 0)
-    const valesExpenses = periodExpenses
-      .filter(e => e.payment_method === 'Vales de despensa')
-      .reduce((s, e) => s + e.amount, 0)
+    let expense = 0, realExpenses = 0, valesExpenses = 0
+    for (const e of allExpenses) {
+      const amt = getExpenseAmountForPeriod(e, period, selectedYear, selectedMonth)
+      if (amt === 0) continue
+      expense += amt
+      if (e.payment_method === 'Vales de despensa') valesExpenses += amt
+      else realExpenses += amt
+    }
     const freeCashFlow = income - expense
 
     const periodStats = { income, expense, realExpenses, valesExpenses, freeCashFlow }

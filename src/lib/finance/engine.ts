@@ -20,6 +20,59 @@ export function calcBonoPorPago(base: number, frequency: Frequency): number {
 
 export type Period = 'week' | 'month' | 'year' | 'all'
 
+function isDateInPeriod(d: Date, period: Period, refYear: number, refMonth: number, now: Date): boolean {
+  if (period === 'all') return true
+  if (period === 'year') return d.getFullYear() === refYear
+  if (period === 'month') return d.getFullYear() === refYear && d.getMonth() === refMonth
+  if (period === 'week') {
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const day = today.getDay()
+    const diff = today.getDate() - day + (day === 0 ? -6 : 1)
+    const startOfWeek = new Date(today.getFullYear(), today.getMonth(), diff)
+    const endOfWeek = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate() + 7)
+    return d >= startOfWeek && d < endOfWeek
+  }
+  return true
+}
+
+// Returns the portion of an MSI expense's amount that falls within the given period.
+// Non-MSI expenses return the full amount if purchased in that period, else 0.
+// MSI expenses spread installments across months and count those in the period.
+export function getExpenseAmountForPeriod(
+  e: Expense,
+  period: Period,
+  refYear: number,
+  refMonth: number
+): number {
+  if (period === 'all') return e.amount
+  const now = new Date()
+  const purchaseDate = new Date(e.date + 'T00:00:00')
+  if (!e.is_msi || e.msi_months <= 1) {
+    return isDateInPeriod(purchaseDate, period, refYear, refMonth, now) ? e.amount : 0
+  }
+  const installment = e.amount / e.msi_months
+  let count = 0
+  for (let i = 0; i < e.msi_months; i++) {
+    const d = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth() + i, purchaseDate.getDate())
+    if (isDateInPeriod(d, period, refYear, refMonth, now)) count++
+  }
+  return installment * count
+}
+
+// For global balance: only count installments already charged (due date <= today).
+export function getMsiAmountPaidToDate(e: Expense): number {
+  if (!e.is_msi || e.msi_months <= 1) return e.amount
+  const now = new Date()
+  const purchaseDate = new Date(e.date + 'T00:00:00')
+  const installment = e.amount / e.msi_months
+  let count = 0
+  for (let i = 0; i < e.msi_months; i++) {
+    const d = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth() + i, purchaseDate.getDate())
+    if (d <= now) count++
+  }
+  return installment * count
+}
+
 export function filterByPeriod<T extends { date: string }>(
   items: T[],
   period: Period,

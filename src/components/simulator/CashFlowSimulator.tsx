@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import type { RecurringExpense, RecurringIncome, Frequency } from '@/lib/supabase/client'
+import { getMsiAmountPaidToDate } from '@/lib/finance/engine'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,7 +153,7 @@ export function CashFlowSimulator() {
       .reduce((s, i) => s + i.amount, 0)
     const expense = allExpenses
       .filter(e => e.payment_method !== 'Vales de despensa')
-      .reduce((s, e) => s + e.amount, 0)
+      .reduce((s, e) => s + getMsiAmountPaidToDate(e), 0)
     return Math.round(income - expense)
   }, [allIncomes, allExpenses])
 
