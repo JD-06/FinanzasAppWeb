@@ -34,6 +34,51 @@ function toMonthly(amount: number, freq: Frequency): number {
   return amount
 }
 
+type ViewMode = 'month' | 'week'
+
+function dateKey(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+function diffDays(a: Date, b: Date): number {
+  return Math.round((b.getTime() - a.getTime()) / 86400000)
+}
+
+function getMonthRange(ref: Date): { start: Date; end: Date } {
+  return {
+    start: new Date(ref.getFullYear(), ref.getMonth(), 1),
+    end: new Date(ref.getFullYear(), ref.getMonth() + 1, 0),
+  }
+}
+
+function getWeekRange(ref: Date): { start: Date; end: Date } {
+  const start = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate())
+  const day = start.getDay()
+  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1))
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  return { start, end }
+}
+
+function getRange(mode: ViewMode, ref: Date): { start: Date; end: Date } {
+  return mode === 'month' ? getMonthRange(ref) : getWeekRange(ref)
+}
+
+function navigateRef(mode: ViewMode, ref: Date, dir: 1 | -1): Date {
+  if (mode === 'month') return new Date(ref.getFullYear(), ref.getMonth() + dir, 1)
+  const d = new Date(ref)
+  d.setDate(d.getDate() + dir * 7)
+  return d
+}
+
+function rangeLabel(mode: ViewMode, range: { start: Date; end: Date }): string {
+  if (mode === 'month') {
+    const label = range.start.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+    return label.charAt(0).toUpperCase() + label.slice(1)
+  }
+  return `${range.start.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} – ${range.end.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}`
+}
+
 interface DayPoint {
   dateStr: string
   label: string
@@ -114,6 +159,11 @@ function findExtreme(points: DayPoint[], mode: 'best' | 'worst'): { start: strin
   return { start: points[idx].dateStr, end: points[Math.min(idx + w - 1, points.length - 1)].dateStr, avg: Math.round(best) }
 }
 
+function findExtremeDay(points: DayPoint[], mode: 'best' | 'worst'): DayPoint | null {
+  if (points.length === 0) return null
+  return points.reduce((b, p) => (mode === 'best' ? p.balance > b.balance : p.balance < b.balance) ? p : b)
+}
+
 function avgLastMonths<T extends { date: string }>(items: T[], getAmount: (i: T) => number, months = 3): number {
   const now = new Date()
   const totals: number[] = []
@@ -170,7 +220,8 @@ export function CashFlowSimulator() {
   const { data: allExpenses = [] } = useExpenses()
   const { data: debts = [] } = useDebts()
 
-  const [horizon, setHorizon] = useState<7 | 30 | 60 | 90>(30)
+  const [viewMode, setViewMode] = useState<ViewMode>('month')
+  const [refDate, setRefDate] = useState(() => new Date())
   const [varOverride, setVarOverride] = useState('')
   const [checkAmount, setCheckAmount] = useState('')
 
@@ -226,40 +277,50 @@ export function CashFlowSimulator() {
     allExpenses.filter(e => e.is_msi && e.msi_months > 1 && e.payment_method !== 'Vales de despensa'),
     [allExpenses])
 
+  const range = getRange(viewMode, refDate)
+  const todayKey = dateKey(today)
+  const rangeStartKey = dateKey(range.start)
+  const rangeEndKey = dateKey(range.end)
+  const displayStartKey = rangeStartKey > todayKey ? rangeStartKey : todayKey
+  const daysToProject = Math.max(1, diffDays(today, range.end) + 1)
+  const canGoPrev = !(rangeStartKey <= todayKey && todayKey <= rangeEndKey)
+  const canGoNext = viewMode === 'month' ? diffDays(today, range.start) < 365 : diffDays(today, range.start) < 84
+
   const projection = useMemo(() =>
-    buildProjection(saldoEfectivo, recurringExpenses, recurringIncomes, msiExpenses, dailyVar, horizon, today),
-    [saldoEfectivo, recurringExpenses, recurringIncomes, msiExpenses, dailyVar, horizon, today])
+    buildProjection(saldoEfectivo, recurringExpenses, recurringIncomes, msiExpenses, dailyVar, daysToProject, today),
+    [saldoEfectivo, recurringExpenses, recurringIncomes, msiExpenses, dailyVar, daysToProject, today])
 
-  const chartData = useMemo(() => {
-    if (horizon <= 30) return projection
-    const step = horizon <= 60 ? 2 : 3
-    return projection.filter((_, i) => i % step === 0)
-  }, [projection, horizon])
+  const displayed = useMemo(() =>
+    projection.filter(p => p.dateStr >= displayStartKey && p.dateStr <= rangeEndKey),
+    [projection, displayStartKey, rangeEndKey])
 
-  const horizonLabel: Record<7 | 30 | 60 | 90, string> = { 7: 'semana', 30: '30 días', 60: '60 días', 90: '90 días' }
+  const minBalance = displayed.length ? Math.min(...displayed.map(p => p.balance)) : 0
+  const maxBalance = displayed.length ? Math.max(...displayed.map(p => p.balance)) : 0
+  const finalBalance = displayed.at(-1)?.balance ?? 0
 
-  const minBalance = projection.length ? Math.min(...projection.map(p => p.balance)) : 0
-  const maxBalance = projection.length ? Math.max(...projection.map(p => p.balance)) : 0
-  const finalBalance = projection.at(-1)?.balance ?? 0
+  const xAxisInterval = displayed.length > 15 ? 2 : displayed.length > 8 ? 1 : 0
 
   // ── insights ──────────────────────────────────────────────────────────────
 
-  const bestWeek = useMemo(() => findExtreme(projection, 'best'), [projection])
-  const worstWeek = useMemo(() => findExtreme(projection, 'worst'), [projection])
+  const bestWeek = useMemo(() => viewMode === 'month' ? findExtreme(displayed, 'best') : { start: '', end: '', avg: 0 }, [displayed, viewMode])
+  const worstWeek = useMemo(() => viewMode === 'month' ? findExtreme(displayed, 'worst') : { start: '', end: '', avg: 0 }, [displayed, viewMode])
+  const bestDay = useMemo(() => viewMode === 'week' ? findExtremeDay(displayed, 'best') : null, [displayed, viewMode])
+  const worstDay = useMemo(() => viewMode === 'week' ? findExtremeDay(displayed, 'worst') : null, [displayed, viewMode])
 
   // Upcoming expenses (recurring + MSI installments): name, date, balance after payment
   const upcomingExpenses = useMemo(() => {
-    const balMap = new Map(projection.map(p => [p.dateStr, p.balance]))
-    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + horizon)
+    const balMap = new Map(displayed.map(p => [p.dateStr, p.balance]))
+    const displayStart = new Date(displayStartKey + 'T00:00:00')
+    const rangeEnd = new Date(rangeEndKey + 'T00:00:00')
     type Item = { id: string; name: string; amount: number; dateStr: string; dateLabel: string; balAfter: number }
 
     const recurring: Item[] = recurringExpenses.flatMap(r => {
       let d = new Date(r.next_charge + 'T00:00:00')
-      let g = 0; while (d < today && g++ < 800) d = advance(d, r.frequency)
+      let g = 0; while (d < displayStart && g++ < 800) d = advance(d, r.frequency)
       const hits: Item[] = []
       let c = 0
-      while (d <= end && c++ < 6) {
-        const key = d.toISOString().slice(0, 10)
+      while (d <= rangeEnd && c++ < 12) {
+        const key = dateKey(d)
         hits.push({
           id: `${r.id}-${key}`,
           name: r.name,
@@ -280,8 +341,8 @@ export function CashFlowSimulator() {
       const items: Item[] = []
       for (let i = 0; i < e.msi_months; i++) {
         const d = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth() + i, purchaseDate.getDate())
-        if (d >= today && d <= end) {
-          const key = d.toISOString().slice(0, 10)
+        if (d >= displayStart && d <= rangeEnd) {
+          const key = dateKey(d)
           items.push({
             id: `msi-${e.id}-${i}`,
             name: `${label} (${i + 1}/${e.msi_months} MSI)`,
@@ -295,10 +356,8 @@ export function CashFlowSimulator() {
       return items
     })
 
-    return [...recurring, ...msi]
-      .sort((a, b) => a.dateStr.localeCompare(b.dateStr))
-      .slice(0, 15)
-  }, [recurringExpenses, msiExpenses, projection, horizon, today])
+    return [...recurring, ...msi].sort((a, b) => a.dateStr.localeCompare(b.dateStr))
+  }, [recurringExpenses, msiExpenses, displayed, displayStartKey, rangeEndKey])
 
   // "¿Puedo pagarlo?" analysis
   type PaymentOk   = { canAfford: true;  amount: number; best: DayPoint }
@@ -306,11 +365,11 @@ export function CashFlowSimulator() {
   const paymentResult = useMemo((): PaymentOk | PaymentFail | null => {
     const amount = Number(checkAmount)
     if (!amount || amount <= 0) return null
-    const affordable = projection.filter(p => p.balance >= amount)
+    const affordable = displayed.filter(p => p.balance >= amount)
     if (affordable.length === 0) return { canAfford: false, amount, maxBalance }
     const best = affordable.reduce((b, p) => (p.balance > b.balance ? p : b))
     return { canAfford: true, amount, best }
-  }, [checkAmount, projection, maxBalance])
+  }, [checkAmount, displayed, maxBalance])
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -369,21 +428,30 @@ export function CashFlowSimulator() {
         <CardHeader>
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-base">Saldo proyectado</CardTitle>
-            <div className="flex gap-1">
-              {([7, 30, 60, 90] as const).map(h => (
-                <Button key={h} size="sm" variant={horizon === h ? 'default' : 'outline'} className="h-7 text-xs px-2.5"
-                  onClick={() => setHorizon(h)}>
-                  {h === 7 ? 'Semana' : `${h}d`}
-                </Button>
-              ))}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex gap-1">
+                <Button size="sm" variant={viewMode === 'month' ? 'default' : 'outline'} className="h-7 text-xs px-2.5"
+                  onClick={() => setViewMode('month')}>Mes</Button>
+                <Button size="sm" variant={viewMode === 'week' ? 'default' : 'outline'} className="h-7 text-xs px-2.5"
+                  onClick={() => setViewMode('week')}>Semana</Button>
+              </div>
+              <div className="flex items-center gap-1 border rounded-lg overflow-hidden">
+                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-none" disabled={!canGoPrev}
+                  onClick={() => setRefDate(d => navigateRef(viewMode, d, -1))}>‹</Button>
+                <span className="px-2 text-xs font-medium text-center min-w-[120px]">
+                  {rangeLabel(viewMode, range)}
+                </span>
+                <Button variant="ghost" size="sm" className="h-7 px-2 rounded-none" disabled={!canGoNext}
+                  onClick={() => setRefDate(d => navigateRef(viewMode, d, 1))}>›</Button>
+              </div>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={chartData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+            <LineChart data={displayed} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,120,120,0.12)" />
-              <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={horizon <= 30 ? 4 : horizon <= 60 ? 3 : 2} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={xAxisInterval} />
               <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
               <Tooltip
                 contentStyle={{ fontSize: 12 }}
@@ -409,11 +477,13 @@ export function CashFlowSimulator() {
               <p className="font-bold text-sm text-emerald-600">{fmt(maxBalance)}</p>
             </div>
             <div className="bg-muted/40 rounded-lg p-3 text-center">
-              <p className="text-[10px] text-muted-foreground mb-0.5">Saldo en {horizon} días</p>
+              <p className="text-[10px] text-muted-foreground mb-0.5">Saldo al final</p>
               <p className={`font-bold text-sm ${finalBalance < 0 ? 'text-destructive' : finalBalance > saldoEfectivo ? 'text-emerald-600' : ''}`}>
                 {fmt(finalBalance)}
               </p>
-              <p className="text-[10px] text-muted-foreground">en {horizonLabel[horizon]}</p>
+              <p className="text-[10px] text-muted-foreground">
+                {viewMode === 'month' ? `fin de ${range.start.toLocaleDateString('es-MX', { month: 'long' })}` : 'fin de semana'}
+              </p>
             </div>
           </div>
         </CardContent>
@@ -426,7 +496,7 @@ export function CashFlowSimulator() {
         <Card>
           <CardHeader><CardTitle className="text-base">Momentos clave</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            {bestWeek.start && (
+            {viewMode === 'month' && bestWeek.start && (
               <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 rounded-lg p-3">
                 <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mb-1">
                   Mejor semana para compras grandes
@@ -440,7 +510,7 @@ export function CashFlowSimulator() {
               </div>
             )}
 
-            {worstWeek.start && (
+            {viewMode === 'month' && worstWeek.start && (
               <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg p-3">
                 <p className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">
                   Semana más ajustada — evita gastos imprevistos
@@ -452,6 +522,32 @@ export function CashFlowSimulator() {
                 </p>
                 <p className={`text-xs mt-0.5 ${worstWeek.avg < 0 ? 'text-red-600 font-semibold' : 'text-red-500'}`}>
                   {worstWeek.avg < 0 ? '⚠️ ' : ''}Saldo promedio esa semana: {fmt(worstWeek.avg)}
+                </p>
+              </div>
+            )}
+
+            {viewMode === 'week' && bestDay && (
+              <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 rounded-lg p-3">
+                <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mb-1">
+                  Mejor día para compras grandes
+                </p>
+                <p className="font-semibold text-sm">
+                  {new Date(bestDay.dateStr + 'T00:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' })}
+                </p>
+                <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-0.5">Saldo proyectado: {fmt(bestDay.balance)}</p>
+              </div>
+            )}
+
+            {viewMode === 'week' && worstDay && (
+              <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg p-3">
+                <p className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">
+                  Día más ajustado — evita gastos imprevistos
+                </p>
+                <p className="font-semibold text-sm">
+                  {new Date(worstDay.dateStr + 'T00:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' })}
+                </p>
+                <p className={`text-xs mt-0.5 ${worstDay.balance < 0 ? 'text-red-600 font-semibold' : 'text-red-500'}`}>
+                  {worstDay.balance < 0 ? '⚠️ ' : ''}Saldo proyectado: {fmt(worstDay.balance)}
                 </p>
               </div>
             )}
@@ -511,7 +607,7 @@ export function CashFlowSimulator() {
                 </div>
               ) : (
                 <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg p-3 space-y-2 text-sm">
-                  <p className="font-semibold text-red-700 dark:text-red-400">No alcanza en {horizonLabel[horizon]}</p>
+                  <p className="font-semibold text-red-700 dark:text-red-400">No alcanza {viewMode === 'month' ? 'este mes' : 'esta semana'}</p>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Tu saldo máximo proyectado:</span>
                     <span className="font-medium">{fmt(paymentResult.maxBalance)}</span>
@@ -520,7 +616,9 @@ export function CashFlowSimulator() {
                     <span className="text-muted-foreground">Te falta acumular:</span>
                     <span className="font-medium text-destructive">{fmt(paymentResult.amount - paymentResult.maxBalance)}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">Intenta con el horizonte de 60 o 90 días.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Prueba revisando {viewMode === 'month' ? 'el siguiente mes' : 'la siguiente semana'}.
+                  </p>
                 </div>
               )
             )}
