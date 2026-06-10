@@ -1,6 +1,6 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import type { Income, Expense } from '@/lib/supabase/client'
-import type { Period } from '@/lib/finance/engine'
+import { getExpenseOccurrences, type Period } from '@/lib/finance/engine'
 
 interface Props {
   incomes: Income[]
@@ -15,6 +15,9 @@ export function PeriodChart({ incomes, expenses, period, selectedYear, selectedM
 
   const today = new Date()
 
+  // Cada gasto se descompone en sus ocurrencias reales (cuotas MSI por mes, o el gasto único)
+  const expenseOccurrences = expenses.flatMap(getExpenseOccurrences)
+
   if (period === 'week') {
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i)
@@ -22,7 +25,9 @@ export function PeriodChart({ incomes, expenses, period, selectedYear, selectedM
       data.push({
         label: d.toLocaleDateString('es', { weekday: 'short' }),
         Ingresos: incomes.filter(inc => inc.date === dateStr).reduce((s, x) => s + x.amount, 0),
-        Gastos: expenses.filter(exp => exp.date === dateStr).reduce((s, x) => s + x.amount, 0),
+        Gastos: expenseOccurrences
+          .filter(occ => occ.date.toISOString().slice(0, 10) === dateStr)
+          .reduce((s, occ) => s + occ.amount, 0),
       })
     }
   } else if (period === 'month') {
@@ -38,14 +43,10 @@ export function PeriodChart({ incomes, expenses, period, selectedYear, selectedM
         const day = new Date(i.date + 'T00:00:00').getDate()
         data[Math.min(Math.floor((day - 1) / 7), 3)].Ingresos += i.amount
       })
-    expenses
-      .filter(e => {
-        const d = new Date(e.date + 'T00:00:00')
-        return d.getFullYear() === selectedYear && d.getMonth() === selectedMonth
-      })
-      .forEach(e => {
-        const day = new Date(e.date + 'T00:00:00').getDate()
-        data[Math.min(Math.floor((day - 1) / 7), 3)].Gastos += e.amount
+    expenseOccurrences
+      .filter(occ => occ.date.getFullYear() === selectedYear && occ.date.getMonth() === selectedMonth)
+      .forEach(occ => {
+        data[Math.min(Math.floor((occ.date.getDate() - 1) / 7), 3)].Gastos += occ.amount
       })
   } else if (period === 'year') {
     for (let i = 0; i < 12; i++) {
@@ -58,16 +59,16 @@ export function PeriodChart({ incomes, expenses, period, selectedYear, selectedM
     incomes
       .filter(i => new Date(i.date + 'T00:00:00').getFullYear() === selectedYear)
       .forEach(i => { data[new Date(i.date + 'T00:00:00').getMonth()].Ingresos += i.amount })
-    expenses
-      .filter(e => new Date(e.date + 'T00:00:00').getFullYear() === selectedYear)
-      .forEach(e => { data[new Date(e.date + 'T00:00:00').getMonth()].Gastos += e.amount })
+    expenseOccurrences
+      .filter(occ => occ.date.getFullYear() === selectedYear)
+      .forEach(occ => { data[occ.date.getMonth()].Gastos += occ.amount })
   } else {
     // All time — por año
     const allIncYears = incomes.map(i => new Date(i.date + 'T00:00:00').getFullYear())
-    const allExpYears = expenses.map(e => new Date(e.date + 'T00:00:00').getFullYear())
+    const allExpYears = expenseOccurrences.map(occ => occ.date.getFullYear())
     let minYear = Math.min(...allIncYears, ...allExpYears, today.getFullYear())
     if (!isFinite(minYear)) minYear = today.getFullYear()
-    const maxYear = today.getFullYear()
+    const maxYear = Math.max(...allExpYears, today.getFullYear())
     for (let y = minYear; y <= maxYear; y++) {
       data.push({ label: String(y), Ingresos: 0, Gastos: 0 })
     }
@@ -76,10 +77,9 @@ export function PeriodChart({ incomes, expenses, period, selectedYear, selectedM
       const idx = y - minYear
       if (data[idx]) data[idx].Ingresos += i.amount
     })
-    expenses.forEach(e => {
-      const y = new Date(e.date + 'T00:00:00').getFullYear()
-      const idx = y - minYear
-      if (data[idx]) data[idx].Gastos += e.amount
+    expenseOccurrences.forEach(occ => {
+      const idx = occ.date.getFullYear() - minYear
+      if (data[idx]) data[idx].Gastos += occ.amount
     })
   }
 

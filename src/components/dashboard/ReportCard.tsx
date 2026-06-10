@@ -33,7 +33,7 @@ export function ReportCard() {
   const filteredExpenses = useMemo(() => filterByListPeriod(expenses, period, refDate), [expenses, period, refDate])
 
   const totalIncome  = filteredIncomes.reduce((s, i) => s + i.amount, 0)
-  const totalExpense = filteredExpenses.reduce((s, e) => s + e.amount, 0)
+  const totalExpense = filteredExpenses.reduce((s, e) => s + (e.is_msi && e.msi_months > 1 ? e.amount / e.msi_months : e.amount), 0)
 
   const futurePayments = useMemo(
     () => computeFuturePayments(recurringExpenses, recurringIncomes, period, refDate),

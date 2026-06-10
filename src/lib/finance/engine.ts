@@ -59,6 +59,23 @@ export function getExpenseAmountForPeriod(
   return installment * count
 }
 
+// Splits an expense into its individual occurrences with their effective date and amount.
+// Non-MSI expenses return a single occurrence on the purchase date for the full amount.
+// MSI expenses return one occurrence per installment, each on its monthly due date.
+export function getExpenseOccurrences(e: Expense): { date: Date; amount: number }[] {
+  const purchaseDate = new Date(e.date + 'T00:00:00')
+  if (!e.is_msi || e.msi_months <= 1) {
+    return [{ date: purchaseDate, amount: e.amount }]
+  }
+  const installment = e.amount / e.msi_months
+  const occurrences: { date: Date; amount: number }[] = []
+  for (let i = 0; i < e.msi_months; i++) {
+    const d = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth() + i, purchaseDate.getDate())
+    occurrences.push({ date: d, amount: installment })
+  }
+  return occurrences
+}
+
 // For global balance: only count installments already charged (due date <= today).
 export function getMsiAmountPaidToDate(e: Expense): number {
   if (!e.is_msi || e.msi_months <= 1) return e.amount
